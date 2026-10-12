@@ -1,5 +1,6 @@
 import { $, text, icon, hydrateIcons, syncSelect, dateTime, names } from './ui.js';
 import { renderModelTrace, runModelTrace } from '../modeltrace/panel.js';
+import { renderTraceSchedule } from './trace-schedule.js';
 import { analyzeAnswer } from './answer-analysis.js';
 import { renderSVGPreview } from './svg-preview.js';
 import { renderHTMLPreview, stopHTMLPreview } from './html-preview.js';
@@ -103,6 +104,7 @@ function renderControls() {
   $('#run').disabled = $('#run').hasAttribute('aria-busy') || !$('#model').value || modelRunning($('#model').value);
   renderTestAnswer();
   renderModelTrace(data);
+  renderTraceSchedule(data, { request, refresh });
 }
 function renderTestAnswer() {
   if (!data) return;

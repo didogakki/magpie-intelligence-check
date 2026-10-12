@@ -14,7 +14,7 @@ for(const [goos,goarch] of platforms){
  if(result.status!==0)throw Error(`Build failed: ${name}`);
  await mkdir(path.join(root,'bin'),{recursive:true});await copyFile(output,path.join(root,'bin',name));
  const bytes=await readFile(output);manifest.artifacts.push({name,goos,goarch,size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
- const bundle=path.join(root,'dist',`magpie-intelligence-check-${goos}-${goarch}`);await mkdir(path.join(bundle,'bin'),{recursive:true});
+ const bundle=path.join(root,'dist',`magpie-intelligence-modeltrace-${goos}-${goarch}`);await mkdir(path.join(bundle,'bin'),{recursive:true});
  for(const entry of ['plugin','assets','third_party','package.json','README.md','LICENSE'])await cp(path.join(root,entry),path.join(bundle,entry),{recursive:true});
  // Never distribute a runtime gate snapshot or its private probe alias.
  await writeFile(path.join(bundle,'plugin','gate.middleware.js'),'export function onRequest(body) { return body; }\n');

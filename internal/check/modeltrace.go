@@ -44,21 +44,29 @@ func traceChallenges() []Result {
 }
 
 func (s *Service) TriggerModelTrace(model string) error {
+	_, err := s.triggerModelTraceAt(model, s.traceNow())
+	return err
+}
+
+// triggerModelTraceAt starts one 3-probe batch stamped `now` and returns its batch id.
+// A real HTTP 529 or a confirmed network/timeout/5xx failure ends the batch: the
+// remaining probes are recorded as not sent, so a degraded upstream is not hit again.
+func (s *Service) triggerModelTraceAt(model string, now time.Time) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := s.state.Targets[model]
 	if t == nil {
-		return errors.New("模型未配置")
+		return "", errors.New("模型未配置")
 	}
 	if s.running[model] {
-		return errors.New("该模型已有检测进行中，请完成后重试")
+		return "", errors.New("该模型已有检测进行中，请完成后重试")
 	}
 	cfg := s.state.Config
 	if cfg.GatewayURL == "" || cfg.GatewayKey == "" {
-		return errors.New("请配置 Magpie 网关 URL 和 Key")
+		return "", errors.New("请配置 Magpie 网关 URL 和 Key")
 	}
 	count := 0
-	day := time.Now().UTC().Format("2006-01-02")
+	day := now.UTC().Format("2006-01-02")
 	count += s.state.ClearedUsage[day][model]
 	for _, r := range s.state.Results {
 		if r.Model == model && r.Time.UTC().Format("2006-01-02") == day {
@@ -66,40 +74,54 @@ func (s *Service) TriggerModelTrace(model string) error {
 		}
 	}
 	if count+3 > cfg.DailyLimit {
-		return errors.New("ModelTrace 需要 3 次请求，今日剩余预算不足")
+		return "", errors.New("ModelTrace 需要 3 次请求，今日剩余预算不足")
 	}
 	probes := traceChallenges()
 	start := len(s.state.Results)
 	for i := range probes {
 		probes[i].Model = model
-		probes[i].Time = time.Now()
+		probes[i].Time = now
 	}
 	s.state.Results = append(s.state.Results, probes...)
 	if err := s.store.Save(s.state); err != nil {
 		s.state.Results = s.state.Results[:start]
-		return err
+		return "", err
 	}
-	alias := s.state.Alias
+	alias, batch := s.state.Alias, probes[0].Batch
 	s.running[model] = true
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		defer func() { s.mu.Lock(); delete(s.running, model); s.mu.Unlock() }()
+		stopped := false
 		for i, r := range probes {
-			ctx, cancel := context.WithTimeout(s.ctx, 180*time.Second)
-			answer, tokens, err := Call(ctx, cfg, "quality-probe/"+alias+"/"+model, r.PromptText)
-			cancel()
-			r.Answer, r.Tokens, r.Verdict = answer, tokens, "manual"
-			if err != nil {
-				r.Verdict, r.Error = "unavailable", err.Error()
+			r.Verdict = "manual"
+			if stopped {
+				r.Verdict, r.Error = "unavailable", "上游已确认故障，本轮不再发送请求"
+			} else {
+				ctx, cancel := context.WithTimeout(s.ctx, 180*time.Second)
+				answer, tokens, err := Call(ctx, cfg, "quality-probe/"+alias+"/"+model, r.PromptText)
+				cancel()
+				r.Answer, r.Tokens = answer, tokens
+				if err != nil {
+					r.Verdict, r.Error = "unavailable", err.Error()
+					r.HTTPStatus, r.ErrorKind = traceFailure(err)
+					stopped = r.HTTPStatus == 529 || r.HTTPStatus >= 500 && r.HTTPStatus < 600 || r.ErrorKind != ""
+				}
 			}
+			probes[i] = r
 			s.mu.Lock()
 			s.state.Results[start+i] = r
+			// The whole batch is classified exactly once, in the same save as its last result.
+			// A shutdown mid-batch leaves it unclassified: it is neither a failure nor a recovery.
+			if i == len(probes)-1 && s.ctx.Err() == nil {
+				s.classifyTraceBatchLocked(model, r.Batch, probes, s.traceNow())
+			}
 			if err := s.store.Save(s.state); err != nil {
 				s.health = err.Error()
 			}
 			s.mu.Unlock()
 		}
 	}()
-	return nil
+	return batch, nil
 }

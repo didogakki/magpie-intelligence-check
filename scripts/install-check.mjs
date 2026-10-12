@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 const root=path.resolve(import.meta.dirname,'..');
 const platform={win32:'windows'}[process.platform]||process.platform;
 const arch={x64:'amd64',arm64:'arm64'}[process.arch];
-const name=`magpie-intelligence-check-${platform}-${arch}`;
+const name=`magpie-intelligence-modeltrace-${platform}-${arch}`;
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'quality-install-'));
 try{
  const unpack=spawnSync('tar',['-xzf',path.join(root,'dist',name+'.tgz'),'-C',dir],{stdio:'inherit'});assert.equal(unpack.status,0);

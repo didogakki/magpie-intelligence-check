@@ -94,7 +94,7 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 				logHealth = "日志源可读"
 			}
 		}
-		writeJSON(w, map[string]any{"state": state, "health": health, "log_health": logHealth, "last_activity": lastActivity, "gateway_configured": gatewayConfigured, "prompts": Prompts, "guidance": Guidance})
+		writeJSON(w, map[string]any{"state": state, "health": health, "log_health": logHealth, "last_activity": lastActivity, "gateway_configured": gatewayConfigured, "trace_schedule_status": s.TraceScheduleStatus(time.Now()), "legacy_compat": s.LegacyCompatStatus(), "prompts": Prompts, "guidance": Guidance})
 	})
 	mux.HandleFunc("GET /api/results/{id}/download", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
@@ -203,6 +203,35 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 			return
 		}
 		writeJSON(w, map[string]any{"ok": true, "model_count": len(models)})
+	})
+	mux.HandleFunc("POST /api/trace-schedule", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Enabled bool                      `json:"enabled"`
+			Models  map[string]TraceModelPlan `json:"models"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if err := s.SetTraceSchedule(input.Enabled, input.Models); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("POST /api/trace-seed", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Seed  TraceSeed `json:"seed"`
+			Apply bool      `json:"apply"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		report, err := s.ImportTraceSeed(input.Seed, input.Apply)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]any{"applied": input.Apply, "entries": report, "legacy_snapshot": LegacySnapshotReport(input.Seed)})
 	})
 	mux.HandleFunc("POST /api/target", func(w http.ResponseWriter, r *http.Request) {
 		var t Target

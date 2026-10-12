@@ -73,6 +73,12 @@ func Models(ctx context.Context, c Config) ([]Model, error) {
 	return out, nil
 }
 
+// HTTPStatusError carries the real upstream status code, so callers never have to
+// recognise a status from error text.
+type HTTPStatusError struct{ Status int }
+
+func (e *HTTPStatusError) Error() string { return fmt.Sprintf("Magpie HTTP %d", e.Status) }
+
 func Call(ctx context.Context, c Config, model, prompt string) (string, int, error) {
 	return call(ctx, c, model, prompt, nil)
 }
@@ -99,7 +105,7 @@ func call(ctx context.Context, c Config, model, prompt string, progress func(str
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return "", 0, fmt.Errorf("Magpie HTTP %d", resp.StatusCode)
+		return "", 0, &HTTPStatusError{resp.StatusCode}
 	}
 	if progress != nil && strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 		return readAnswerStream(resp.Body, progress)
@@ -112,7 +118,7 @@ func call(ctx context.Context, c Config, model, prompt string, progress func(str
 		return "", 0, errors.New("回复超过大小限制")
 	}
 	if resp.StatusCode != 200 {
-		return "", 0, fmt.Errorf("Magpie HTTP %d", resp.StatusCode)
+		return "", 0, &HTTPStatusError{resp.StatusCode}
 	}
 	var out struct {
 		Choices []struct {

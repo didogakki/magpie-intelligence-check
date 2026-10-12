@@ -7,6 +7,7 @@
   <title>Intelligence Check</title>
   <link rel="icon" href="/assets/icon.png">
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/trace-schedule.css">
   <script type="module" src="/assets/app.js"></script>
 </head>
 <body>
@@ -83,6 +84,16 @@
       <button id="traceRun" class="primary"><i data-icon="Fingerprint"></i><span>运行三条指纹挑战</span></button>
     </div>
     <p class="disclaimer">概率仅表示当前候选库内的相似程度，不证明模型身份；指纹结果不改变门禁。</p>
+    <details id="traceSchedule" class="trace-schedule">
+      <summary>定时指纹检测 <span id="scheduleSummary" class="meta"></span></summary>
+      <form id="scheduleForm">
+        <label class="schedule-switch"><input type="checkbox" name="enabled"><span>启用定时检测（默认关闭，仅检测勾选的模型）</span></label>
+        <div id="scheduleModels" class="schedule-models"></div>
+        <p class="disclaimer">每次定时检测等同于手动运行三条指纹挑战：每轮 3 次请求，计入每日预算，最多使用每日预算的一半，且与手动检测互斥。间隔随连续一致次数从 15 分钟增至 4 小时；529 与临时故障按退避重试；结果未确认时暂停该模型的自动检测，需手动检测并得出明确结果后恢复；服务未运行时不补跑。结果是指纹比较，不证明账号、渠道或物理模型身份，也不改变门禁。</p>
+        <div class="dialog-actions"><span></span><button class="primary"><i data-icon="Check"></i>保存定时设置</button></div>
+        <p id="scheduleMessage" class="inline-state" role="status"></p>
+      </form>
+    </details>
     <div id="traceResults" aria-live="polite"></div>
   </section>
   <section id="view-history" class="view" role="tabpanel" aria-labelledby="tab-history" hidden>

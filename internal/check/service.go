@@ -37,6 +37,8 @@ type Result struct {
 	Answer        string    `json:"answer"`
 	Verdict       string    `json:"verdict"`
 	Error         string    `json:"error,omitempty"`
+	HTTPStatus    int       `json:"http_status,omitempty"` // real upstream status of a failed trace probe
+	ErrorKind     string    `json:"error_kind,omitempty"`  // "timeout" or "network": confirmed transport failure
 	Time          time.Time `json:"time"`
 	Tokens        int       `json:"tokens"`
 	Batch         string    `json:"batch,omitempty"`
@@ -94,11 +96,13 @@ func (s *Service) DeleteTarget(model string) error {
 }
 
 type State struct {
-	Config       Config                    `json:"config"`
-	Targets      map[string]*Target        `json:"targets"`
-	Results      []Result                  `json:"results"`
-	Alias        string                    `json:"alias"`
-	ClearedUsage map[string]map[string]int `json:"cleared_usage,omitempty"`
+	Config        Config                    `json:"config"`
+	Targets       map[string]*Target        `json:"targets"`
+	Results       []Result                  `json:"results"`
+	Alias         string                    `json:"alias"`
+	ClearedUsage  map[string]map[string]int `json:"cleared_usage,omitempty"`
+	TraceSchedule TraceSchedule             `json:"trace_schedule"`
+	Compat        *LegacyCompat             `json:"legacy_compat,omitempty"` // private: holds old account identifiers
 }
 
 func (s *Service) ClearResults(ids []string) error {
@@ -147,6 +151,10 @@ type Service struct {
 	store        *Store
 	health       string
 	lastActivity time.Time
+	schedWake    chan struct{}
+	schedOnce    sync.Once
+	compat       compatRuntime
+	clock        func() time.Time // nil means time.Now; tests inject a fixed clock
 }
 
 func Secret() string {
@@ -164,7 +172,7 @@ func New(dir, gate string) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{dir: dir, gate: gate, store: store, running: map[string]bool{}}
+	s := &Service{dir: dir, gate: gate, store: store, running: map[string]bool{}, schedWake: make(chan struct{}, 1)}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.state = State{Config: Config{DailyLimit: 120}, Targets: map[string]*Target{}, Results: []Result{}, Alias: Secret()}
 	if err := store.Load(&s.state); err != nil {
@@ -183,13 +191,14 @@ func New(dir, gate string) (*Service, error) {
 			s.state.Results[i].Error = "检测服务重启，请重试"
 		}
 	}
+	s.normalizeScheduleLocked()
 	if err := s.saveLocked(); err != nil {
 		store.Close()
 		return nil, err
 	}
 	return s, nil
 }
-func (s *Service) Close() { s.cancel(); s.wg.Wait(); s.store.Close() }
+func (s *Service) Close() { s.cancel(); s.wg.Wait(); s.releaseLegacyLock(); s.store.Close() }
 func AtomicWrite(name string, b []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(name), ".quality-*")
 	if err != nil {
@@ -250,6 +259,7 @@ func (s *Service) Snapshot() (State, string) {
 	json.Unmarshal(b, &out)
 	out.Config.GatewayKey = ""
 	out.Alias = ""
+	out.Compat = nil // the console never sees the old account identifiers; see LegacyCompatStatus
 	return out, s.health
 }
 func (s *Service) Configure(c Config) error {

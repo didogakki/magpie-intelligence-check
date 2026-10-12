@@ -1,6 +1,6 @@
 {
-  "name": "magpie-intelligence-check",
-  "version": "0.3.0",
+  "name": "magpie-intelligence-modeltrace",
+  "version": "0.4.0",
   "type": "module",
   "main": "./plugin/index.mjs",
   "files": [
